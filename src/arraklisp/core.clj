@@ -10,7 +10,8 @@
     SYM = ('a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h' | 'i' | 'j' | 'k' | 'l' | 'm' | 'n' | 'o' | 'p' | 'q' | 'r' | 's' | 't' | 'u' | 'v' | 'w' | 'x' | 'y' | 'z' | '+' | '-' | '\\\\' | '*')+
     FUN = <'(kwisatz {'> (<' '> SYM)* <'} '> AL <')'>
     CALL = <'('> (SYM | FUN) (<' '> AL)* <')'>
-    LET = <'(muaddib ['> (<'('> SYM <' '> AL <')'>)* <'] '> AL <')'>
+    LETPAIR = (<'('> SYM <' '> AL <') '>)
+    LET = <'(muaddib ['> LETPAIR* <'] '> AL <')'>
     DEF = <'(arrakis '> SYM <' '> AL <')'>"))
 
 (defn cljnum->alnum
@@ -48,16 +49,29 @@
                                                                                  env))
              :else (throw (Exception. (str "only functions are callable, not " expr))))))
 
+(defn eval-let
+  "turns a LET expr into a CALL / FUN expr"
+  [labeled-pairings body scope]
+  (if (nil? labeled-pairings)
+    (eval-al body scope)
+    (let [pairings (rest labeled-pairings)
+          syms (map first pairings)
+          vals (map second pairings)
+          fun (cons :FUN (concat syms [body]))
+          call-s (concat [:CALL fun] vals)]
+      (eval-al (doall call-s) scope))))
+
 (defn eval-al
   "evaluates a given arraklisp expression"
   [tree scope]
   (m/match tree
-         [:SYM sym] (lookup sym scope)
+         [:SYM sym] (eval-al (lookup sym scope) scope)
          [:NUM num] (read-string num)
          [:FUN & params-body] [:EXPR {:params (butlast params-body)
                                       :body (last params-body)
                                       :env scope}]
          [:EXPR & stuff] (vec (cons :EXPR stuff))
+         [:LET & stuff] (eval-let (butlast stuff) (last stuff) scope)
          [:CALL [:SYM sym] & args] (eval-al (vec (concat [:CALL (lookup sym scope)] args)) scope)
          [:CALL fun & args] (call-fun fun (map (fn [x] (eval-al x scope)) args) scope)))
 
