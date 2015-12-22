@@ -1,6 +1,6 @@
 (ns arraklisp.core
   (:require [instaparse.core :as insta]
-            [clojure.core.match :as cmatch])
+            [clojure.core.match :as m])
   (:gen-class))
 
 (def to-syntax
@@ -33,39 +33,42 @@
 
 (declare eval-al)
 
-(defn call-sym
-  "lookup a function at given symbol and evaluate a call - error if not a function"
-  [sym scope args]
-  ;; put built in functions here
-  (cmatch/match (lookup sym scope)
-                [:+] (cljnum->alnum (apply + (map (comp read-string second) args)))
-                [:/] (cljnum->alnum (apply / (map (comp read-string second) args)))
-                [:*] (cljnum->alnum (apply * (map (comp read-string second) args)))
-                [:-] (cljnum->alnum (apply - (map (comp read-string second) args)))
-                [:FUN & params-body] (eval-al (last params-body)
-                                              (extend-scope (butlast params-body) args scope))
-                :else (throw (Exception. (str "attempting to call a non-function " sym)))))
+(defn call-fun
+  "call a function using its lexical scope"
+  [fun args scope]
+  (let [expr (eval-al fun scope)]
+    (m/match expr
+             [:EXPR :+] (cljnum->alnum (apply + args))
+             [:EXPR :/] (cljnum->alnum (apply / args))
+             [:EXPR :*] (cljnum->alnum (apply * args))
+             [:EXPR :-] (cljnum->alnum (apply - args))
+             [:EXPR {:params params :body body :env env}] (eval-al body
+                                                                   (extend-scope params
+                                                                                 args
+                                                                                 env))
+             :else (throw (Exception. (str "only functions are callable, not " expr))))))
 
 (defn eval-al
   "evaluates a given arraklisp expression"
   [tree scope]
-  (cmatch/match tree
+  (m/match tree
          [:SYM sym] (lookup sym scope)
          [:NUM num] (read-string num)
-         [:FUN & params-body] [:FUN (butlast params-body) (last params-body)]
-         [:CALL [:SYM sym] & args] (call-sym sym scope args)
-         [:CALL [:FUN & params-body] & args] (eval-al (last params-body)
-                                                      (extend-scope (butlast params-body)
-                                                                    args
-                                                                    scope))))
+         [:FUN & params-body] [:EXPR {:params (butlast params-body)
+                                      :body (last params-body)
+                                      :env scope}]
+         [:EXPR & stuff] (vec (cons :EXPR stuff))
+         [:CALL [:SYM sym] & args] (eval-al (vec (concat [:CALL (lookup sym scope)] args)) scope)
+         [:CALL fun & args] (call-fun fun (map (fn [x] (eval-al x scope)) args) scope)))
+
 (defn top-eval
   "top level evaluation"
   [in-str]
-  (let [init-scope {"+" [:+] "-" [:-] "/" [:/] "*" [:*]}
+  (let [init-scope {"+" [:EXPR :+] "-" [:EXPR :-] "/" [:EXPR :/] "*" [:EXPR :*]}
         evald (eval-al (first (to-syntax in-str)) init-scope)]
-    (cmatch/match evald
-           [:NUM num] (str num " :: NUMBER")
-           [:FUN & stuff] "kwisatz... :: FUNCTION")))
+    (m/match evald
+             [:NUM num] (str num " :: NUMBER")
+             [:EXPR & stuff] "kwisatz... :: FUNCTION")))
 
 ;;(defn gogo-repl
   ;;"go repl!"
