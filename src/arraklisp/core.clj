@@ -10,14 +10,29 @@
     SYM = ('a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h' | 'i' | 'j' | 'k' | 'l' | 'm' | 'n' | 'o' | 'p' | 'q' | 'r' | 's' | 't' | 'u' | 'v' | 'w' | 'x' | 'y' | 'z' | '+' | '-' | '\\\\' | '*')+
     FUN = <'(kwisatz {'> (<' '> SYM)* <'} '> AL <')'>
     CALL = <'('> (SYM | FUN) (<' '> AL)* <')'>
-    LETPAIR = (<'('> SYM <' '> AL <') '>)
+    LETPAIR = (<' ('> SYM <' '> AL <')'>)
     LET = <'(muaddib ['> LETPAIR* <'] '> AL <')'>
     DEF = <'(arrakis '> SYM <' '> AL <')'>"))
+
+(declare eval-al)
 
 (defn cljnum->alnum
   "converts a clojure Number into an Arraklisp number"
   [num]
   [:NUM (str num)])
+
+(defn alnum->cljnum
+  "converst al num to clojure number"
+  [alnum]
+  (m/match alnum
+         [:NUM num] (read-string num)
+         :else (throw (Exception. (str alnum " is not a number!")))))
+
+(defn prim-apply
+  "applies operation to ASTs, if not nums, error out"
+  [op asts scope]
+  (let [nums (map (fn [x] (alnum->cljnum (eval-al x scope))) asts)]
+    (cljnum->alnum (apply op nums))))
 
 (defn extend-scope
   "add syms-values zipped map to the given scope"
@@ -32,20 +47,20 @@
   (or (scope sym)
       (throw (Exception. (str "symbol " sym " not found")))))
 
-(declare eval-al)
 
 (defn call-fun
   "call a function using its lexical scope"
   [fun args scope]
-  (let [expr (eval-al fun scope)]
+  (let [expr (eval-al fun scope)
+        e-args (map (fn [x] (eval-al x scope)) args)]
     (m/match expr
-             [:EXPR :+] (cljnum->alnum (apply + args))
-             [:EXPR :/] (cljnum->alnum (apply / args))
-             [:EXPR :*] (cljnum->alnum (apply * args))
-             [:EXPR :-] (cljnum->alnum (apply - args))
+             [:EXPR :+ env] (prim-apply + args env)
+             [:EXPR :/ env] (prim-apply / args env)
+             [:EXPR :* env] (prim-apply * args env)
+             [:EXPR :- env] (prim-apply - args env)
              [:EXPR {:params params :body body :env env}] (eval-al body
-                                                                   (extend-scope params
-                                                                                 args
+                                                                   (extend-scope (vec (map second params))
+                                                                                 e-args
                                                                                  env))
              :else (throw (Exception. (str "only functions are callable, not " expr))))))
 
@@ -54,31 +69,35 @@
   [labeled-pairings body scope]
   (if (nil? labeled-pairings)
     (eval-al body scope)
-    (let [pairings (rest labeled-pairings)
-          syms (map first pairings)
-          vals (map second pairings)
-          fun (cons :FUN (concat syms [body]))
+    (let [syms (vec (map second labeled-pairings))
+          vals (vec (map (fn [x] (nth x 2)) labeled-pairings))
+          fun (vec (concat [:FUN] (concat syms [body])))
           call-s (concat [:CALL fun] vals)]
-      (eval-al (doall call-s) scope))))
+      ;; (println (vec call-s))
+      (eval-al (vec call-s) scope))))
 
 (defn eval-al
   "evaluates a given arraklisp expression"
   [tree scope]
   (m/match tree
+         [:SYM "+"] [:EXPR :+ scope]
+         [:SYM "-"] [:EXPR :- scope]
+         [:SYM "/"] [:EXPR :/ scope]
+         [:SYM "*"] [:EXPR :* scope]
          [:SYM sym] (eval-al (lookup sym scope) scope)
-         [:NUM num] (read-string num)
+         [:NUM num] [:NUM num]
          [:FUN & params-body] [:EXPR {:params (butlast params-body)
                                       :body (last params-body)
                                       :env scope}]
          [:EXPR & stuff] (vec (cons :EXPR stuff))
          [:LET & stuff] (eval-let (butlast stuff) (last stuff) scope)
-         [:CALL [:SYM sym] & args] (eval-al (vec (concat [:CALL (lookup sym scope)] args)) scope)
+         [:CALL [:SYM sym] & args] (eval-al (vec (concat [:CALL (eval-al [:SYM sym] scope)] args)) scope)
          [:CALL fun & args] (call-fun fun (map (fn [x] (eval-al x scope)) args) scope)))
 
 (defn top-eval
   "top level evaluation"
   [in-str]
-  (let [init-scope {"+" [:EXPR :+] "-" [:EXPR :-] "/" [:EXPR :/] "*" [:EXPR :*]}
+  (let [init-scope {}
         evald (eval-al (first (to-syntax in-str)) init-scope)]
     (m/match evald
              [:NUM num] (str num " :: NUMBER")
