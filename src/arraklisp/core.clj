@@ -96,20 +96,33 @@
 
 (defn top-eval
   "top level evaluation"
-  [in-str]
-  (let [init-scope {}
-        evald (eval-al (first (to-syntax in-str)) init-scope)]
+  [in-str init-scope]
+  (let [evald (eval-al (first (to-syntax in-str)) init-scope)]
     (m/match evald
-             [:NUM num] (str num " :: NUMBER")
-             [:EXPR & stuff] "kwisatz... :: FUNCTION")))
+             [:NUM num] (str "=> " num " :: NUMBER")
+             [:EXPR & stuff] "=> kwisatz... :: FUNCTION")))
 
-;;(defn gogo-repl
-  ;;"go repl!"
-  ;;[scope]
-  ;;(loop [repl-scope scope]
+(defn gogo-repl
+  "go repl!"
+  [scope]
+  (println "<terrible purpose>")
+  (let [input (read-line)]
+    (when-not (= "exit" input)
+      (let [before (first (to-syntax input))]
+        (try
+          (m/match before
+                   [:DEF sym al] (do (println "def'd")
+                                     (gogo-repl (extend-scope [(second sym)]
+                                                              [(eval-al al scope)]
+                                                              scope)))
+                   _ (do (println (top-eval input scope))
+                         (gogo-repl scope)))
+          (catch Exception e (do (println "May thy knife chip and shatter!")
+                                 (gogo-repl scope))))))))
+
 
 
 (defn -main
-  "I don't do a whole lot ... yet."
+  "I run the arraklisp REPL."
   [& args]
-  (println "Hello, World!"))
+  (gogo-repl {}))
