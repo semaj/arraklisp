@@ -43,7 +43,7 @@ Functions will display terribly non-useful information.
 <terrible purpose>
 (kwisatz { x} (+ x 1))
 => kwisatz... :: FUNCTION
-~~
+~~~
 
 Make a mistake? Have a great dune quote! (There's only one.)
 ~~~
